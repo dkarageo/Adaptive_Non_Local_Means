@@ -20,7 +20,8 @@ OBJECTS=$(addprefix $(OBJDIR)/, \
 
 CUOBJECTS=$(addprefix $(CUOBJDIR)/, \
 				anlm.o \
-				DMat.o)
+				DMat.o \
+				init.o )
 
 all: $(OBJECTS) $(CUOBJECTS) | $(BINDIR)
 	$(CXX) $(OBJECTS) $(CUOBJECTS) -o $(BINDIR)/demo_anlm $(CXXFLAGS) \
@@ -46,3 +47,17 @@ clean:
 
 purge: clean
 	rm -rf bin
+
+test: test1
+
+test_full: test test2 test3
+
+test1:
+	./bin/demo_anlm test_datasets/woman_blonde_small_noisy.karas 6 \
+					test_datasets/woman_blonde_small_filtered.karas
+
+test2:
+	./bin/demo_anlm test_datasets/woman_blonde_noisy.karas 6
+
+test3:
+	./bin/demo_anlm test_datasets/clouds_noisy.karas 6
