@@ -51,7 +51,6 @@ template <class T>
 DMat<T>::~DMat()
 {
     if (_isOwner) {
-        std::cout << "Is owner" << std::endl;
         cudaError_t cudaStat = cudaFree(data);
         assert(cudaSuccess == cudaStat);
     }
