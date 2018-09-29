@@ -11,6 +11,14 @@
 
 namespace cuda
 {
+    template <class T>
+    class DMat;
+
+    template <class T>
+    void
+    swap(DMat<T>& first, DMat<T>& second);
+
+
     struct DMatPos
     {
         int x;
@@ -18,6 +26,7 @@ namespace cuda
 
         __device__ DMatPos(int y, int x) : y(y), x(x) {}
     };
+
 
     template <class T>
     class DMat
@@ -28,24 +37,27 @@ namespace cuda
         size_t width;
         size_t pitch;
 
+        DMat();
         DMat(size_t width, size_t height);
-        DMat(T *hostData, size_t width, size_t height);
-        DMat(const DMat &dmat);
+        DMat(T* hostData, size_t width, size_t height);
+        DMat(const DMat& dmat);
+        DMat(DMat&& dmat);
+        DMat<T>& operator=(DMat<T> dmat);
         virtual ~DMat();
 
-        void copyFromHost(T *hostData, int width, int height);
-        void copyToHost(T *hostDst);
+        friend void swap<T>(DMat<T>& first, DMat<T>& second);
+
+        void copyFromHost(T* hostData, int width, int height);
+        void copyToHost(T* hostDst);
 
         __device__ inline T& at(int y, int x);
-        __device__ inline T& at(const DMatPos &pos);
+        __device__ inline T& at(const DMatPos& pos);
         __device__ inline T& operator()(int y, int x);
 
-    protected:
-        DMat();
-
-    private:
+    // private:
         bool _isOwner;
     };
+
 
     template <class T>
     class DMatExpanded : public DMat<T>
@@ -61,6 +73,7 @@ namespace cuda
         DMatExpanded(T *hostData, size_t width, size_t height,
                      size_t expWidth, size_t expHeight);
         DMatExpanded(const DMatExpanded &dmat);
+        DMatExpanded<T> &operator=(const DMatExpanded<T> &dmat);
         ~DMatExpanded();
 
         void copyFromHost(T *hostData, int width, int height,
@@ -71,6 +84,7 @@ namespace cuda
         size_t _expWidth;
         size_t _expHeight;
     };
+
 
     template <class T>
     __device__ inline T&

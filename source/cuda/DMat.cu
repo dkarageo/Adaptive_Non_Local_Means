@@ -9,29 +9,51 @@
 #include "DMat.hpp"
 
 
-using namespace cuda;
+namespace cuda {
 
 
 template <class T>
+void
+swap(DMat<T>& first, DMat<T>& second)
+{
+    using std::swap;
+
+    swap(first.width, second.width);
+    swap(first.height, second.height);
+    swap(first.pitch, second.pitch);
+    swap(first.data, second.data);
+    swap(first._isOwner, second._isOwner);
+}
+
+template <class T>
 DMat<T>::DMat()
-: _isOwner(true)
-{}
+: _isOwner(true),
+  height(0),
+  width(0),
+  pitch(0),
+  data(nullptr)
+{
+    // std::cout << "Calling DMat constructor" << std::endl;
+}
 
 template <class T>
 DMat<T>::DMat(size_t width, size_t height)
 : DMat()
 {
+    cudaError_t cudaStat;
+
     this->width = width;
     this->height = height;
 
-    cudaError_t cudaStat;
-
-    cudaStat = cudaMallocPitch(&data, &pitch, sizeof(T) * width, height);
-    assert(cudaSuccess == cudaStat);
+    if (width > 0 && height > 0) {
+        // std::cout << "Creating matrix: " << width << "x" << height << std::endl;
+        cudaStat = cudaMallocPitch(&data, &pitch, sizeof(T) * width, height);
+        assert(cudaSuccess == cudaStat);
+    } else std::cout << "Creating empty matrix" << std::endl;
 }
 
 template <class T>
-DMat<T>::DMat(T *hostData, size_t width, size_t height)
+DMat<T>::DMat(T* hostData, size_t width, size_t height)
 : DMat(width, height)
 {
     copyFromHost(hostData, width, height);
@@ -40,6 +62,12 @@ DMat<T>::DMat(T *hostData, size_t width, size_t height)
 template <class T>
 DMat<T>::DMat(const DMat<T> &dmat)
 {
+    // std::cout << "Copying matrix - isOwner:" << (dmat._isOwner ? "true" : "false")
+    //           << " width:" << dmat.width
+    //           << " height:" << dmat.height
+    //           << " pitch:" << dmat.pitch
+    //           << std::endl;
+
     data = dmat.data;
     width = dmat.width;
     height = dmat.height;
@@ -48,9 +76,28 @@ DMat<T>::DMat(const DMat<T> &dmat)
 }
 
 template <class T>
+DMat<T>::DMat(DMat<T> &&dmat)
+{
+    swap<T>(*this, dmat);
+}
+
+template <class T>
+DMat<T>&
+DMat<T>::operator=(DMat<T> dmat)
+{
+    swap<T>(*this, dmat);
+    if (data == dmat.data) dmat._isOwner = false;
+    return *this;
+}
+
+template <class T>
 DMat<T>::~DMat()
 {
-    if (_isOwner) {
+    // std::cout << "Destructing DMat" << std::endl;
+
+    if (_isOwner && data) {
+        // std::cout << "is owner" << std::endl;
+
         cudaError_t cudaStat = cudaFree(data);
         assert(cudaSuccess == cudaStat);
     }
@@ -123,6 +170,17 @@ DMatExpanded<T>::DMatExpanded(const DMatExpanded<T> &dmat)
 }
 
 template <class T>
+DMatExpanded<T>&
+DMatExpanded<T>::operator=(const DMatExpanded<T> &dmat)
+{
+    DMat<T>::operator=(dmat);
+    _expData = dmat._expData;
+    _expWidth = dmat._expWidth;
+    _expHeight = dmat._expHeight;
+    return *this;
+}
+
+template <class T>
 DMatExpanded<T>::~DMatExpanded()
 {
     // Restore data attr for parent destructor.
@@ -175,6 +233,9 @@ template class DMat<float>;
 template class DMat<float*>;
 template class DMat<DMatPos>;
 template class DMat<DMatPos*>;
+template class DMat<DMat<double>>;
+template class DMat<DMat<float>>;
+template class DMat<DMat<DMatPos>>;
 
 template class DMatExpanded<double>;
 template class DMatExpanded<double*>;
@@ -184,3 +245,6 @@ template class DMatExpanded<float>;
 template class DMatExpanded<float*>;
 template class DMatExpanded<DMatPos>;
 template class DMatExpanded<DMatPos*>;
+
+
+}
