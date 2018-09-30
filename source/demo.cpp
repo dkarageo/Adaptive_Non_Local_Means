@@ -152,7 +152,8 @@ testCudaAnlmFP64(vector<double> noisyImg, int height, int width,
     auto start = Clock::now();
     cuda::adaptiveNonLocalMeans<double>(noisyImg.data(), filteredImg.data(),
                                         ids.data(), filterSigma.data(),
-                                        height, width, 5, 5, (double) 5/3);
+                                        height, width, 5, 5, (double) 5/3,
+                                        regions);
     auto stop = Clock::now();
 
     cout << "Image size: " << height << "x" << width << endl;
@@ -207,7 +208,8 @@ testCudaAnlmFP32(vector<double> noisyImgFP64, int height, int width,
     auto start = Clock::now();
     cuda::adaptiveNonLocalMeans<float>(noisyImg.data(), filteredImg.data(),
                                        ids.data(), filterSigma.data(),
-                                       height, width, 5, 5, (float) 5/3);
+                                       height, width, 5, 5, (float) 5/3,
+                                       regions);
     auto stop = Clock::now();
 
     cout << "Image size: " << height << "x" << width << endl;

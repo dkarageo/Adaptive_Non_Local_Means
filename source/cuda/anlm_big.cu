@@ -1,7 +1,7 @@
 /**
- * anlm.cu
+ * anlm_big.cu
  *
- * Version: 0.1
+ * Version: 0.2
  */
 
 #include <iostream>
@@ -54,9 +54,9 @@ template <> __device__ inline float __anlm_pow(float x, float y) { return powf(x
 
 template <class T>
 void
-adaptiveNonLocalMeans(T *src, T *dst, int *ids, T *filterSigma,
-                     int imgH, int imgW, int patchH, int patchW,
-                     T patchSigma)
+adaptiveNonLocalMeansBigData(T *src, T *dst, int *ids, T *filterSigma,
+                             int imgH, int imgW, int patchH, int patchW,
+                             T patchSigma, int regions)
 {
     cudaProfilerStart();
 
@@ -178,7 +178,7 @@ cudaAnlmKernel(DMatExpanded<T> dSrc, DMat<T> dDst, DMat<int> dIds,
     denom += maxWeight;
 
     if (denom != 0) dDst(y, x) = nom / denom;
-    else dDst(y, x) == dSrc(y, x);
+    else dDst(y, x) = dSrc(y, x);
 }
 
 template <class T>
@@ -269,11 +269,11 @@ calculateGaussianFilter(int m, int n, T sigma)
 
 template
 void
-adaptiveNonLocalMeans<float> (float *, float *, int *, float *,
-                              int, int, int, int, float);
+adaptiveNonLocalMeansBigData<float> (float *, float *, int *, float *,
+                              int, int, int, int, float, int);
 template
 void
-adaptiveNonLocalMeans<double>(double *, double *, int *, double *,
-                              int, int, int, int, double);
+adaptiveNonLocalMeansBigData<double>(double *, double *, int *, double *,
+                                     int, int, int, int, double, int);
 
 }
