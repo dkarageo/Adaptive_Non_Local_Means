@@ -11,6 +11,8 @@ CUOBJDIR=cuobj
 
 BINDIR=bin
 
+force_big: MODS=-DFORCE_ANLM_BIG
+
 vpath %.cpp source
 vpath %.hpp source source/cuda
 vpath %.cu source/cuda
@@ -44,11 +46,18 @@ all: $(OBJECTS) $(CUOBJECTS) | $(BINDIR)
 	$(CXX) $(OBJECTS) $(CUOBJECTS) -o $(BINDIR)/demo_anlm $(CXXFLAGS) \
 			$(CULINK) $(CULDLIBS) $(LDLIBS)
 
+force_big: $(OBJECTS) $(CUOBJECTS) | $(BINDIR)
+	$(CXX) $(OBJECTS) $(CUOBJECTS) -o $(BINDIR)/demo_anlm $(CXXFLAGS) \
+			$(CULINK) $(CULDLIBS) $(LDLIBS)
+
 $(OBJDIR)/%.o: %.cpp | $(OBJDIR)
 	$(CXX) $< -c -o $@ $(CXXFLAGS) $(MODS)
 
+$(OBJDIR)/demo.o: demo.cpp FORCE | $(OBJDIR)
+	$(CXX) $< -c -o $@ $(CXXFLAGS) $(MODS)
+
 $(CUOBJDIR)/%.o: %.cu | $(CUOBJDIR)
-	$(NVCC) $< -c -o $@ $(CUFLAGS) $(CULDLIBS)
+	$(NVCC) $< -c -o $@ $(CUFLAGS) $(CULDLIBS) $(MODS)
 
 $(OBJDIR):
 	mkdir $(OBJDIR)
@@ -130,3 +139,6 @@ bench_clouds:
 	echo "Running benchmark on 'clouds' data..."
 	echo "WARNING: This benchmark may take several hours to complete!"
 	./$(BINDIR)/demo_anlm test_datasets/clouds_noisy.karas 6
+
+.PHONY: FORCE
+FORCE:
