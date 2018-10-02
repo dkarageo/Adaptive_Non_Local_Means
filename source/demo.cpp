@@ -1,6 +1,33 @@
 /**
  * demo.cpp
  *
+ * Created by Dimitrios Karageorgiou,
+ *  for course "Parallel And Distributed Systems".
+ *  Electrical and Computers Engineering Department, AuTh, GR - 2017-2018
+ *
+ * An application that demonstrates Adaptive Non Local Means (ANLM) implementations
+ * provided in current project. It benchmarks both FP32 and FP64 implementations
+ * and can test the validity of results by comparing to given precomputed data.
+ *
+ * Application utilizes custom binary files ended with .karas that are actually
+ * a serialized matrix of doubles. They start with two uint32_t fields
+ * containing height and width respectively. Then height*width doubles are
+ * following. The matrix is stored in row major order.
+ *
+ * Usage:
+ *  ./binfile <noisy_img> <regions> [<filtered_img>]
+ * where:
+ *  -noisy_img : A .karas file containing the grayscale image to be denoised.
+ *          Each cell in the matrix represents luminosity of each pixel in
+ *          range [0, 1].
+ *  -regions : Number of regions the image will be divided into in order to
+ *          apply ANLM.
+ *  -filtered_image [optional]: A .karas file containing the precomputed
+ *          denoised image. This image is expected to have been computed using
+ *          another ANLM implementation with the same mathematical characteristics.
+ *          The application will compare the output of current ANLM implementation
+ *          output, against these data. It can be seen as a light unit test.
+ *
  * Version: 0.1
  */
 
@@ -61,13 +88,7 @@ int main(int argc, char *argv[])
     dataStream.read((char*) noisyImg.data(), sizeof(double)*height*width);
     dataStream.close();
 
-    // if (dataStream.bad()) cout << "Failed to read (badbit):" << argv[1] << endl;
-    // if (dataStream.fail()) cout << "Failed to read (badbit|failbit):" << argv[1] << endl;
-    // if (dataStream.eof()) cout << "Failed to read (eofbit):" << argv[1] << endl;
-    // cout << "Loaded " << argv[1] << "-Items:" << noisyImg.size()
-    //      << "Image size:" << width << "x" << height << endl;
-
-    cuda::deviceInit();
+    cuda::deviceInit();  // Warm up device.
 
     cout << "================================================" << endl;
     testCudaAnlmFP64(noisyImg, height, width, regions, testFile);
@@ -82,71 +103,12 @@ void
 testCudaAnlmFP64(vector<double> noisyImg, int height, int width,
                  int regions, char *testFile)
 {
-    // Precompute anlm's argument that should not be part of the benchmark.
+    // Precompute anlm's arguments that should not be part of the benchmark.
     vector<int> ids = calculateEachPixelRegion<double>(noisyImg, regions);
     vector<double> filterSigma = calculateEachPixelSigma<double>(
             noisyImg, ids, regions);
 
     vector<double> filteredImg(noisyImg.size());
-
-    // // DEBUG
-    //     // for (int i = 0; i < height; ++i) {
-    //     //     for (int j = 0; j < width; ++j) {
-    //     //         cout << filterSigma[i*width+j] << " ";
-    //     //     }
-    //     //     cout << endl;
-    //     // }
-    //
-    //     if (argc >= 5) {
-    //         char *idsFile = argv[4];
-    //
-    //         ifstream idsStream(idsFile, ios_base::binary|ios_base::in);
-    //         if (idsStream.is_open()) {
-    //             uint32_t tHeight;
-    //             uint32_t tWidth;
-    //             idsStream.read((char*) &tHeight, sizeof(uint32_t));
-    //             idsStream.read((char*) &tWidth, sizeof(uint32_t));
-    //             vector<double> idsData(tHeight*tWidth);
-    //             idsStream.read((char*) idsData.data(), sizeof(double)*tHeight*tWidth);
-    //             idsStream.close();
-    //
-    //             vector<int> testIds(idsData.begin(), idsData.end());
-    //
-    //             bool success = equal(testIds.begin(), testIds.end(), ids.begin(),
-    //                                  [] (int a, int b) {
-    //                                      bool s = a == b;
-    //                                      if (!s) cout << "Exp:" << a << " Had:" << b << endl;
-    //                                      return s;
-    //                                  });
-    //
-    //             cout << "IDs Test: " << (success ? "PASSED" : "FAILED") << endl;
-    //         } else cout << "Failed to open " << idsFile << endl;
-    //     }
-    //
-    //     if (argc >= 6) {
-    //         char *idsFile = argv[5];
-    //
-    //         ifstream idsStream(idsFile, ios_base::binary|ios_base::in);
-    //         if (idsStream.is_open()) {
-    //             uint32_t tHeight;
-    //             uint32_t tWidth;
-    //             idsStream.read((char*) &tHeight, sizeof(uint32_t));
-    //             idsStream.read((char*) &tWidth, sizeof(uint32_t));
-    //             vector<double> idsData(tHeight*tWidth);
-    //             idsStream.read((char*) idsData.data(), sizeof(double)*tHeight*tWidth);
-    //             idsStream.close();
-    //
-    //             bool success = equal(idsData.begin(), idsData.end(), filterSigma.begin(),
-    //                                  [] (double a, double b) {
-    //                                      bool s = (a-b) < 0.001 && (a-b) > -0.001;
-    //                                      if (!s) cout << "Exp:" << a << " Had:" << b << endl;
-    //                                      return s;
-    //                                  });
-    //
-    //             cout << "STDs Test: " << (success ? "PASSED" : "FAILED") << endl;
-    //         } else cout << "Failed to open " << idsFile << endl;
-    //     }
-    // // END DEBUG
 
     // Benchmark anlm implementation.
     auto start = Clock::now();
@@ -190,6 +152,8 @@ testCudaAnlmFP64(vector<double> noisyImg, int height, int width,
     }
 }
 
+// TODO: Maybe some day find the equal parts of FP64/FP32 and specialize only
+// the different ones...
 void
 testCudaAnlmFP32(vector<double> noisyImgFP64, int height, int width,
                  int regions, char *testFile)

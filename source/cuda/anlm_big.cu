@@ -1,7 +1,23 @@
 /**
  * anlm_big.cu
  *
- * Version: 0.2
+ * Created by Dimitrios Karageorgiou,
+ *  for course "Parallel And Distributed Systems".
+ *  Electrical and Computers Engineering Department, AuTh, GR - 2017-2018
+ *
+ * A CUDA implementation of Adaptive Non-Local Means algorithm with moderate
+ * GPU DRAM consumption. It can be used for relative big images, as long as
+ * GPU is able to hold 5-6 copies of the image in its memory.
+ *
+ * The logic behind this implementation is the creation of a linked list like
+ * structure for the pixels of each region in the image. That is done in place,
+ * so memory consumption stays low. The downside is that memory accessing by
+ * each CUDA thread is unpredictable and depends on given data. So, coalescion
+ * can be pretty bad and L1 cache misses amount can also be really high.
+ *
+ * Version: 0.1
+ *
+ * License: GNU GPL v3 (see project's license).
  */
 
 #include <iostream>
@@ -11,8 +27,9 @@
 #include <cuda_profiler_api.h>
 #include "DMat.hpp"
 
+
 #define BLOCK_SIZE 256
-#define MIN_BLOCKS_PER_SM 4
+// #define MIN_BLOCKS_PER_SM 4
 
 namespace cuda
 {
@@ -30,12 +47,15 @@ gpuAssert(cudaError_t code, const char *file, int line, bool abort=true)
 template <class T>
 __global__ void
 cudaFindNextEqualKernel(DMat<int> dIds, DMat<DMatPos> dNext, DMat<DMatPos> dPrev);
+
 template <class T>
 __global__ void
 cudaSetPrevEqualKernel(DMat<DMatPos> dNext, DMat<DMatPos> dPrev);
+
 template <class T>
 __global__ void
 cudaFindRegionHeads(DMat<int> dIds, DMat<DMatPos> dPrev, DMat<DMatPos> dHeads);
+
 template <class T>
 std::vector<T>
 calculateGaussianFilter(int m, int n, T sigma);
@@ -60,21 +80,15 @@ adaptiveNonLocalMeansBigData(T *src, T *dst, int *ids, T *filterSigma,
 {
     cudaProfilerStart();
 
-    // std::cout << "Entering anlm" << std::endl;
-    // std::cout << "imgH:" << imgH << " imgW: " << imgW << " patchH:" << patchH
-    //           << " patchW:" << patchW << " patchSigma:" << patchSigma << std::endl;
-
     // Create matrices on device.
     DMatExpanded<T> dSrc(src, imgW, imgH, patchW, patchH);
-    DMat<T> dDst(imgW, imgH);
-    DMat<int> dIds(ids, imgW, imgH);
-    DMat<DMatPos> dNext(imgW, imgH);
-    DMat<DMatPos> dPrev(imgW, imgH);
-    DMat<DMatPos> dHeads(1, 6);
-    DMat<T> dFilterSigma(filterSigma, imgW, imgH);
-    DMat<T> dPatchBlur(patchW, patchH);
-
-    // std::cout << "Matrices created" << std::endl;
+    DMat<T>         dDst(imgW, imgH);
+    DMat<int>       dIds(ids, imgW, imgH);
+    DMat<DMatPos>   dNext(imgW, imgH);
+    DMat<DMatPos>   dPrev(imgW, imgH);
+    DMat<DMatPos>   dHeads(1, 6);
+    DMat<T>         dFilterSigma(filterSigma, imgW, imgH);
+    DMat<T>         dPatchBlur(patchW, patchH);
 
     int gridW = imgW / 32;
     if ((imgW % 32) > 0) gridW++;
@@ -82,8 +96,6 @@ adaptiveNonLocalMeansBigData(T *src, T *dst, int *ids, T *filterSigma,
     if ((imgH % (BLOCK_SIZE / 32)) > 0) gridH++;
     dim3 blockDim(32, BLOCK_SIZE / 32);
     dim3 gridDim(gridW, gridH);
-
-    // std::cout << "Block size calculated" << std::endl;
 
     // Precompute the pixels belonging to each search area.
     cudaFindNextEqualKernel<T><<<gridDim, blockDim>>>(dIds, dNext, dPrev);
@@ -97,8 +109,6 @@ adaptiveNonLocalMeansBigData(T *src, T *dst, int *ids, T *filterSigma,
     dPatchBlur.copyFromHost(patchBlur.data(), patchW, patchH);
     cudaDeviceSynchronize();
 
-    // std::cout << "Computed nexts and gauss blur" << std::endl;
-
     cudaError_t cudaStat = cudaFuncSetCacheConfig(
             cudaAnlmKernel<T>, cudaFuncCachePreferL1);
     assert(cudaSuccess == cudaStat);
@@ -110,11 +120,7 @@ adaptiveNonLocalMeansBigData(T *src, T *dst, int *ids, T *filterSigma,
     gpuErrchk( cudaPeekAtLastError() );
     cudaDeviceSynchronize();
 
-    // std::cout << "Computed anlm" << std::endl;
-
     dDst.copyToHost(dst);
-
-    // std::cout << "Returning anlm" << std::endl;
 
     cudaProfilerStop();
 }
@@ -126,14 +132,14 @@ cudaAnlmKernel(DMatExpanded<T> dSrc, DMat<T> dDst, DMat<int> dIds,
                DMat<DMatPos> dNext, DMat<DMatPos> dPrev, DMat<DMatPos> dHeads,
                DMat<T> dFilterSigma, DMat<T> dPatchBlur, int patchH, int patchW)
 {
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (x >= dSrc.width || y >= dSrc.height) return;
 
     const int boundH = (patchH - 1) / 2;
     const int boundW = (patchW - 1) / 2;
-    const T fSigma = dFilterSigma(y, x) * dFilterSigma(y, x);
+    const T fSigma   = dFilterSigma(y, x) * dFilterSigma(y, x);
 
     __shared__ T patchBlur[5][5];
 
@@ -174,13 +180,19 @@ cudaAnlmKernel(DMatExpanded<T> dSrc, DMat<T> dDst, DMat<int> dIds,
 
     if (maxWeight < __anlm_pow<T>(2.0, -52.0)) maxWeight = __anlm_pow<T>(2.0, -52.0);
 
-    nom += dSrc(y, x) * maxWeight;
+    nom   += dSrc(y, x) * maxWeight;
     denom += maxWeight;
 
     if (denom != 0) dDst(y, x) = nom / denom;
     else dDst(y, x) = dSrc(y, x);
 }
 
+/**
+ * A kernel that finds the next element that belongs to the same region. It
+ * actually creates a forward linkage between each element of regions.
+ *
+ * Also initializes backward linkage matrix.
+ */
 template <class T>
 __global__ void
 cudaFindNextEqualKernel(DMat<int> dIds, DMat<DMatPos> dNext, DMat<DMatPos> dPrev)
@@ -218,6 +230,10 @@ eqFound:
     dPrev(y, x) = DMatPos(-1, -1);
 }
 
+/**
+ * Creates a backwards linkage between elements of each region, expecting
+ * an already formed forward linkage.
+ */
 template <class T>
 __global__ void
 cudaSetPrevEqualKernel(DMat<DMatPos> dNext, DMat<DMatPos> dPrev)
@@ -230,6 +246,9 @@ cudaSetPrevEqualKernel(DMat<DMatPos> dNext, DMat<DMatPos> dPrev)
     if (next.y != -1 && next.x != -1) dPrev.at(next) = DMatPos(y, x);
 }
 
+/**
+ * Finds the root pixels of the linked list like structure of each region.
+ */
 template <class T>
 __global__ void
 cudaFindRegionHeads(DMat<int> dIds, DMat<DMatPos> dPrev, DMat<DMatPos> dHeads)
@@ -241,6 +260,17 @@ cudaFindRegionHeads(DMat<int> dIds, DMat<DMatPos> dPrev, DMat<DMatPos> dHeads)
     if (dPrev(y, x).x == -1) dHeads(0, dIds(y, x)) = DMatPos(y, x);
 }
 
+/**
+ * Calculates a gaussian filter matrix.
+ *
+ * Parameters:
+ *  -m : Height of filter matrix.
+ *  -n : Width of filter matrix.
+ *  -sigma : Sigma to be used for gaussian filter computation.
+ *
+ * Returns:
+ *  A vector containing the gaussian filter in row major order.
+ */
 template <class T>
 std::vector<T>
 calculateGaussianFilter(int m, int n, T sigma)
@@ -267,6 +297,7 @@ calculateGaussianFilter(int m, int n, T sigma)
 }
 
 
+// ----------- Declarations for pregenerating code by compiler -------------
 template
 void
 adaptiveNonLocalMeansBigData<float> (float *, float *, int *, float *,

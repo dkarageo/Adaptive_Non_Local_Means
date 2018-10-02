@@ -1,7 +1,15 @@
 /**
  * DMat.cu
  *
+ * Created by Dimitrios Karageorgiou,
+ *  for course "Parallel And Distributed Systems".
+ *  Electrical and Computers Engineering Department, AuTh, GR - 2017-2018
+ *
+ * An implementation of classes defined in DMat.hpp.
+ *
  * Version: 0.1
+ *
+ * License: GNU GPL v3 (see project's license).
  */
 
 #include <iostream>
@@ -32,9 +40,7 @@ DMat<T>::DMat()
   width(0),
   pitch(0),
   data(nullptr)
-{
-    // std::cout << "Calling DMat constructor" << std::endl;
-}
+{}
 
 template <class T>
 DMat<T>::DMat(size_t width, size_t height)
@@ -46,7 +52,6 @@ DMat<T>::DMat(size_t width, size_t height)
     this->height = height;
 
     if (width > 0 && height > 0) {
-        // std::cout << "Creating matrix: " << width << "x" << height << std::endl;
         cudaStat = cudaMallocPitch(&data, &pitch, sizeof(T) * width, height);
         assert(cudaSuccess == cudaStat);
     } else std::cout << "Creating empty matrix" << std::endl;
@@ -62,12 +67,6 @@ DMat<T>::DMat(T* hostData, size_t width, size_t height)
 template <class T>
 DMat<T>::DMat(const DMat<T> &dmat)
 {
-    // std::cout << "Copying matrix - isOwner:" << (dmat._isOwner ? "true" : "false")
-    //           << " width:" << dmat.width
-    //           << " height:" << dmat.height
-    //           << " pitch:" << dmat.pitch
-    //           << std::endl;
-
     data = dmat.data;
     width = dmat.width;
     height = dmat.height;
@@ -93,11 +92,7 @@ DMat<T>::operator=(DMat<T> dmat)
 template <class T>
 DMat<T>::~DMat()
 {
-    // std::cout << "Destructing DMat" << std::endl;
-
     if (_isOwner && data) {
-        // std::cout << "is owner" << std::endl;
-
         cudaError_t cudaStat = cudaFree(data);
         assert(cudaSuccess == cudaStat);
     }
