@@ -1,17 +1,34 @@
 /**
  * anlm_normal.cu
  *
+ * Created by Dimitrios Karageorgiou,
+ *  for course "Parallel And Distributed Systems".
+ *  Electrical and Computers Engineering Department, AuTh, GR - 2017-2018
+ *
+ * A CUDA implementation of Adaptive Non-Local Means(ANLM) algorithm that
+ * trades-off memory for computation time. It is suitable for small and
+ * moderate sized images.
+ *
+ * The logic of this implementation is to distribute the data of each region
+ * in the image into region specific matrices that provides great memory
+ * coalescion. Then each region is denoised asynchronously by a different CUDA
+ * stream.
+ *
+ * The GPU is expected to be able to hold at least patchH*patchW+8 copies of
+ * the image.
+ *
  * Version: 0.1
+ *
+ * License: GNU GPL v3 (see project's license).
  */
 
 #include <iostream>
 #include <cmath>
 #include <cassert>
 #include <vector>
-#include <thrust/host_vector.h>
-#include <thrust/device_vector.h>
 #include <cuda_profiler_api.h>
 #include "DMat.hpp"
+
 
 #define BLOCK_SIZE 256
 #define MIN_BLOCKS_PER_SM 6
@@ -57,6 +74,14 @@ cudaAnlmKernel(DMat<T> dRSrc, DMat<T> dRPatches, DMat<T> dDst,
                DMat<DMatPos> dOriginalPos, DMat<T> dRFiltersSigma,
                int patchH, int patchW);
 
+// #if __CUDA_ARCH__ == 200
+template<class T>
+__global__ void
+cudaAnlmKernel_medfp32(DMat<T> dRSrc, DMat<T> dRPatches, DMat<T> dDst,
+                       DMat<DMatPos> dOriginalPos, DMat<T> dRFiltersSigma,
+                       int patchH, int patchW);
+// #endif
+
 template <class T>
 __global__ void
 cudaDivideRegions(DMatExpanded<T> dSrc,
@@ -80,36 +105,6 @@ template <> __device__ inline float __anlm_exp<float>(float x) { return expf(x);
 template <class T> __device__ inline T __anlm_pow(T x, T y) { return (T) pow(x, y); }
 template <> __device__ inline float __anlm_pow(float x, float y) { return powf(x, y); }
 
-// template <class T>
-// __global__ void
-// printMatrices(DMat<T> patches, DMat<T> src, DMat<T> sigmas, DMat<DMatPos> pos)
-// {
-//     printf("===============Patches Matrix=============\n");
-//     for (int i = 0; i < patches.width; ++i) {
-//         for (int j = 0; j < patches.height; ++j) {
-//             printf("%f ", patches(j, i));
-//         }
-//         printf("\n");
-//     }
-//
-//     printf("===============Src Matrix=============\n");
-//     for (int i = 0; i < src.width; ++i) {
-//         printf("%f ", src(0, i));
-//     }
-//     printf("\n");
-//
-//     printf("===============Sigmas Matrix=============\n");
-//     for (int i = 0; i < sigmas.width; ++i) {
-//         printf("%f ", sigmas(0, i));
-//     }
-//     printf("\n");
-//
-//     printf("===============Pos Matrix=============\n");
-//     for (int i = 0; i < sigmas.width; ++i) {
-//         printf("(%d %d)", pos(0, i).y, pos(0, i).x);
-//     }
-//     printf("\n");
-// }
 
 template <class T>
 void
@@ -121,11 +116,6 @@ adaptiveNonLocalMeansNormalData(T *src, T *dst, int *ids, T *filterSigma,
 
     cudaProfilerStart();
 
-    // std::cout << "Entering anlm" << std::endl;
-    // std::cout << "imgH:" << imgH << " imgW: " << imgW << " patchH:" << patchH
-    //           << " patchW:" << patchW << " patchSigma:" << patchSigma
-    //           << " regions:" << regions << std::endl;
-
     // Create generic matrices on device.
     DMatExpanded<T> dSrc(src, imgW, imgH, patchW, patchH);
     DMat<T>         dDst(imgW, imgH);
@@ -133,46 +123,10 @@ adaptiveNonLocalMeansNormalData(T *src, T *dst, int *ids, T *filterSigma,
     DMat<T>         dFilterSigma(filterSigma, imgW, imgH);
     DMat<T>         dPatchBlur(patchW, patchH);
 
-    // std::cout << "Created generic matrices" << std::endl;
-
-    // DEBUG - Print src matrix
-    // std::cout << "Src matrix" << std::endl;
-    // for (int i = 0; i < dSrc.height; ++i) {
-    //     for (int j = 0; j < dSrc.width; ++j) {
-    //         std::cout << src[i*dSrc.width+j] << " ";
-    //     }
-    //     std::cout << std::endl;
-    // }
-    // DEBUG - Print ids matrix
-    // std::cout << "Ids matrix" << std::endl;
-    // for (int i = 0; i < dSrc.height; ++i) {
-    //     for (int j = 0; j < dSrc.width; ++j) {
-    //         std::cout << ids[i*dSrc.width+j] << " ";
-    //     }
-    //     std::cout << std::endl;
-    // }
-
     // Find the index of each pixel in its own region and also get the size
     // of each region.
     vector<int> regionSizes(regions);
     vector<int> regionalIndices = divideInRegions(ids, imgH, imgW, regionSizes);
-
-    // DEBUG - Print region sizes.
-    // std::cout << "regionSizes" << std::endl;
-    // for (int i = 0; i < regionSizes.size(); ++i) {
-    //     std::cout << regionSizes[i] << " ";
-    // }
-    // std::cout << std::endl;
-    // DEBUG - Print regionalIndices
-    // std::cout << "regionalIndices" << std::endl;
-    // for (int i = 0; i < dSrc.height; ++i) {
-    //     for (int j = 0; j < dSrc.width; ++j) {
-    //         std::cout << regionalIndices[i*dSrc.width+j] << " ";
-    //     }
-    //     std::cout << std::endl;
-    // }
-
-    // std::cout << "Found regions of each pixel" << std::endl;
 
     // Create separate matrices for each region on device.
     vector<DMat<T>>       dRegionsPatches(regions);
@@ -187,14 +141,10 @@ adaptiveNonLocalMeansNormalData(T *src, T *dst, int *ids, T *filterSigma,
         dOriginalPos[i]         = DMat<DMatPos>(regionSizes[i], 1);
     }
 
-    // std::cout << "Created special matrices" << std::endl;
-
     fillRegionalMatrices<T>(dSrc, dFilterSigma, dIds, regionalIndices, regionSizes,
                             patchH, patchW, dRegionsSrc, dRegionsPatches,
                             dRegionsFiltersSigma, dOriginalPos
     );
-
-    // std::cout << "Matrices divided and copied" << std::endl;
 
     // Create a separate stream for each region.
     vector<cudaStream_t> streams(regions);
@@ -202,8 +152,6 @@ adaptiveNonLocalMeansNormalData(T *src, T *dst, int *ids, T *filterSigma,
         cudaError_t cudaStatus = cudaStreamCreate(&streams[i]);
         assert(cudaSuccess == cudaStatus);
     }
-
-    // std::cout << "Streams created" << std::endl;
 
     // Calculate block and grid dims for each region.
     std::vector<dim3> rBlockDims(regions);
@@ -215,8 +163,6 @@ adaptiveNonLocalMeansNormalData(T *src, T *dst, int *ids, T *filterSigma,
         rGridDims[i]  = dim3(gridW);
     }
 
-    // std::cout << "Block size calculated" << std::endl;
-
     // Calculate and apply a gaussian filter.
     std::vector<T> patchBlur = calculateGaussianFilter<T>(
             patchH, patchW, patchSigma);
@@ -226,41 +172,38 @@ adaptiveNonLocalMeansNormalData(T *src, T *dst, int *ids, T *filterSigma,
             dRegionsPatches[i], dPatchBlur);
     }
 
-    // std::cout << "Applied gauss blur" << std::endl;
-
-    // for (int i = 0; i < regions; ++i) {
-    //     printMatrices<<<1, 1>>>(dRegionsPatches[i], dRegionsSrc[i], dRegionsFiltersSigma[i], dOriginalPos[i]);
-    // }
-
     cudaError_t cudaStat = cudaFuncSetCacheConfig(
             cudaAnlmKernel<T>, cudaFuncCachePreferL1);
     assert(cudaSuccess == cudaStat);
 
-    // Apply anlm to each region separately.
-    for (int i = 0; i < regions; ++i) {
-        cudaAnlmKernel<<<rGridDims[i], rBlockDims[i], 0, streams[i]>>>(
-                dRegionsSrc[i], dRegionsPatches[i], dDst, dOriginalPos[i],
-                dRegionsFiltersSigma[i], patchH, patchW
-        );
-        // gpuErrchk( cudaPeekAtLastError() );
+    // On Compute Capability 2.0 devices, use a kernel with different launch
+    // bounds for FP32 images larget than 256*256.
+// #if __CUDA_ARCH__ == 200
+    if ((sizeof(T) == 4) && (imgH*imgW >= 256*256)) {
+        for (int i = 0; i < regions; ++i) {
+            cudaAnlmKernel_medfp32<<<rGridDims[i], rBlockDims[i], 0, streams[i]>>>(
+                    dRegionsSrc[i], dRegionsPatches[i], dDst, dOriginalPos[i],
+                    dRegionsFiltersSigma[i], patchH, patchW
+            );
+            // gpuErrchk( cudaPeekAtLastError() );
+        }
+    } else {
+// #endif
+        // Apply anlm to each region separately.
+        for (int i = 0; i < regions; ++i) {
+            cudaAnlmKernel<<<rGridDims[i], rBlockDims[i], 0, streams[i]>>>(
+                    dRegionsSrc[i], dRegionsPatches[i], dDst, dOriginalPos[i],
+                    dRegionsFiltersSigma[i], patchH, patchW
+            );
+            // gpuErrchk( cudaPeekAtLastError() );
+        }
+// #if __CUDA_ARCH__ == 200
     }
-
-    // std::cout << "Computed anlm" << std::endl;
+// #endif
 
     dDst.copyToHost(dst);
 
     for (int i = 0; i < streams.size(); ++i) cudaStreamDestroy(streams[i]);
-
-    // DEBUG - Print dst matrix
-    // std::cout << "Dst matrix" << std::endl;
-    // for (int i = 0; i < dSrc.height; ++i) {
-    //     for (int j = 0; j < dSrc.width; ++j) {
-    //         std::cout << dst[i*dSrc.width+j] << " ";
-    //     }
-    //     std::cout << std::endl;
-    // }
-
-    // std::cout << "Returning anlm" << std::endl;
 
     cudaProfilerStop();
 }
@@ -350,137 +293,103 @@ cudaAnlmKernel(DMat<T> dRSrc, DMat<T> dRPatches, DMat<T> dDst,
     else dDst.at(dOriginalPos(0, x)) = dRSrc(0, x);
 }
 
-// template<class T>
-// __global__ void
-// // __launch_bounds__(BLOCK_SIZE)
-// cudaAnlmKernel(DMat<T> dRSrc, DMat<T> dRPatches, DMat<T> dDst,
-//                DMat<DMatPos> dOriginalPos, DMat<T> dRFiltersSigma,
-//                int patchH, int patchW)
-// {
-//     int x = blockIdx.x * blockDim.x + threadIdx.x;
-//
-//     T fSigma = dRFiltersSigma(0, x);
-//     fSigma = fSigma * fSigma;
-//
-//     T nom = 0;
-//     T denom = 0;
-//     T maxWeight = 0;
-//
-//     __shared__ T sPatches[BLOCK_SIZE];
-//     int patchesC = BLOCK_SIZE / dRPatches.height;   // Patches that fit into shared memory.
-//     int chunks   = dRPatches.width / patchesC;      // Iterations needed to load all patches (without division remnants).
-//     int targetY  = threadIdx.x % dRPatches.height;  // Pixel in patch that current thread will load.
-//     int targetX  = threadIdx.x / dRPatches.height;  // Patch whose pixel current thread will load.
-//
-//     // Calculate weights excluding the remainder patches of
-//     // dRPatches.width/patchesC division.
-//     for (int cI = 0; cI < chunks; ++cI) {
-//         __syncthreads();
-//         sPatches[threadIdx.x] = dRPatches(targetY, cI*patchesC+targetX);
-//         __syncthreads();
-//         if (x >= dRSrc.width) continue;
-//
-//         // Iterate over all patches in shared memory.
-//         for (int i = 0; i < patchesC; ++i) {
-//             if (patchesC*cI+i == x) continue;  // Do not count the weight against itself.
-//
-//             T weight = 0;
-//             for (int j = 0; j < dRPatches.height; ++j) {
-//                 T d = dRPatches(j, x) - sPatches[i*dRPatches.height+j];
-//                 weight += d*d;
-//             }
-//             weight = __anlm_exp<T>(-weight/fSigma);
-//             if (weight > maxWeight) maxWeight = weight;  // will use max weight for itself
-//
-//             nom += dRSrc(0, patchesC*cI+i) * weight;
-//             denom += weight;
-//         }
-//     }
-//
-//     // Load the remainder patches (if any).
-//     int rem = dRPatches.width % patchesC;
-//     __syncthreads();
-//     if (threadIdx.x < rem*dRPatches.height) {
-//         sPatches[threadIdx.x] = dRPatches(targetY, chunks*patchesC+targetX);
-//     }
-//     __syncthreads();
-//     if (x >= dRSrc.width) return;
-//
-//     // Calculate weights for the remainder patches of
-//     // dRPatches.width/patchesC division.
-//     for (int i = 0; i < rem; ++i) {
-//         if (chunks*patchesC+i == x) continue;  // Do not count the weight against itself.
-//
-//         T weight = 0;
-//         for (int j = 0; j < dRPatches.height; ++j) {
-//             T d = dRPatches(j, x) - sPatches[i*dRPatches.height+j];
-//             weight += d*d;
-//         }
-//         weight = __anlm_exp<T>(-weight/fSigma);
-//         if (weight > maxWeight) maxWeight = weight;  // will use max weight for itself
-//
-//         nom += dRSrc(0, patchesC*chunks+i) * weight;
-//         denom += weight;
-//     }
-//
-//     // Guarantee that maxWeight will not be 0.
-//     if (maxWeight < __anlm_pow<T>(2.0, -52.0)) maxWeight = __anlm_pow<T>(2.0, -52.0);
-//
-//     // Use maxWeight as the weight for itself.
-//     nom += dRSrc(0, x) * maxWeight;
-//     denom += maxWeight;
-//
-//     // Write back to the complete matrix.
-//     if (denom != 0) dDst.at(dOriginalPos(0, x)) = nom / denom;
-//     else dDst.at(dOriginalPos(0, x)) = dRSrc(0, x);
-// }
+// #if __CUDA_ARCH__ == 200
+/**
+ * cudaAnlmKernel with different launch bounds that targets GTX 480
+ * for FP32 images of size 256*256 or greater. It limits registers per thread
+ * allocation and has been found to provide 1-5% improvement over
+ * compiler's default register allocation. Theoretical occupancy is
+ * increased from about 66% to 100%.
+ */
+template<class T>
+__global__ void
+__launch_bounds__(BLOCK_SIZE, MIN_BLOCKS_PER_SM)
+cudaAnlmKernel_medfp32(DMat<T> dRSrc, DMat<T> dRPatches, DMat<T> dDst,
+                       DMat<DMatPos> dOriginalPos, DMat<T> dRFiltersSigma,
+                       int patchH, int patchW)
+{
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
 
-// template<class T>
-// __global__ void
-// //__launch_bounds__(BLOCK_SIZE, MIN_BLOCKS_PER_SM)
-// cudaAnlmKernel(DMat<T> dRSrc, DMat<T> dRPatches, DMat<T> dDst,
-//                DMat<DMatPos> dOriginalPos, DMat<T> dRFiltersSigma,
-//                int patchH, int patchW)
-// {
-//     int x = blockIdx.x * blockDim.x + threadIdx.x;
-//     if (x >= dRSrc.width) return;
-//
-//     T fSigma = dRFiltersSigma(0, x);
-//     fSigma = fSigma * fSigma;
-//
-//     T nom = 0;
-//     T denom = 0;
-//     T maxWeight = 0;
-//
-//     // Iterate over all pixels in the region to
-//     for (int i = 0; i < dRPatches.width; ++i) {
-//         if (i == x) continue;  // Do not count the weight against itself.
-//
-//         T weight = 0;
-//         for (int j = 0; j < dRPatches.height; ++j) {
-//             T d = dRPatches(j, x) - dRPatches(j, i);
-//             weight += d*d;
-//         }
-//         weight = __anlm_exp<T>(-weight/fSigma);
-//         if (weight > maxWeight) maxWeight = weight;  // will use max weight for itself
-//
-//         nom += dRSrc(0, i) * weight;
-//         denom += weight;
-//     }
-//
-//     // Guarantee that maxWeight will not be 0.
-//     if (maxWeight < __anlm_pow<T>(2.0, -52.0)) maxWeight = __anlm_pow<T>(2.0, -52.0);
-//
-//     // Use maxWeight as the weight for itself.
-//     nom += dRSrc(0, x) * maxWeight;
-//     denom += maxWeight;
-//
-//     // Write back to the complete matrix.
-//     if (denom != 0) dDst.at(dOriginalPos(0, x)) = nom / denom;
-//     else dDst.at(dOriginalPos(0, x)) = dRSrc(0, x);
-// }
+    const int patchSize  = patchH * patchW;
+    const int regionSize = dRPatches.width;
+    const T fSigma       = dRFiltersSigma(0, x) * dRFiltersSigma(0, x);
 
+    T nom = 0;
+    T denom = 0;
+    T maxWeight = 0;
 
+    __shared__ T sPatches[BLOCK_SIZE];
+    const int patchesC = BLOCK_SIZE / patchSize;   // Patches that fit into shared memory.
+    const int chunks   = regionSize / patchesC;    // Iterations needed to load all patches (without division remnants).
+    const int targetY  = threadIdx.x % patchSize;  // Pixel in patch that current thread will load.
+    const int targetX  = threadIdx.x / patchSize;  // Patch whose pixel current thread will load.
+
+    // Calculate weights excluding the remainder patches (of chunks division).
+    for (int cI = 0; cI < chunks; ++cI) {
+        __syncthreads();
+        sPatches[threadIdx.x] = dRPatches(targetY, cI*patchesC+targetX);
+        __syncthreads();
+        if (x >= regionSize) continue;
+
+        // Iterate over all patches in shared memory.
+        for (int i = 0; i < patchesC; ++i) {
+            if (patchesC*cI+i == x) continue;  // Do not count the weight against itself.
+
+            T weight = 0;
+            for (int j = 0; j < patchSize; ++j) {
+                T d = dRPatches(j, x) - sPatches[i*patchSize+j];
+                weight += d*d;
+            }
+            weight = __anlm_exp<T>(-weight/fSigma);
+            if (weight > maxWeight) maxWeight = weight;  // will use max weight for itself
+
+            nom   += dRSrc(0, patchesC*cI+i) * weight;
+            denom += weight;
+        }
+    }
+
+    const int rem = regionSize % patchesC;  // Remainder of patches.
+
+    // Load the remainder patches (if any).
+    __syncthreads();
+    if (threadIdx.x < rem*patchSize) {
+        sPatches[threadIdx.x] = dRPatches(targetY, chunks*patchesC+targetX);
+    }
+    __syncthreads();
+    if (x >= regionSize) return;  // Shared memory loads are over - thread no longer needed.
+
+    // Calculate weights for the remainder patches.
+    for (int i = 0; i < rem; ++i) {
+        if (chunks*patchesC+i == x) continue;  // Do not count the weight against itself.
+
+        T weight = 0;
+        for (int j = 0; j < patchSize; ++j) {
+            T d = dRPatches(j, x) - sPatches[i*patchSize+j];
+            weight += d*d;
+        }
+        weight = __anlm_exp<T>(-weight/fSigma);
+        if (weight > maxWeight) maxWeight = weight;  // will use max weight for itself
+
+        nom   += dRSrc(0, patchesC*chunks+i) * weight;
+        denom += weight;
+    }
+
+    // Guarantee that maxWeight will not be 0.
+    if (maxWeight < __anlm_pow<T>(2.0, -52.0)) maxWeight = __anlm_pow<T>(2.0, -52.0);
+
+    // Use maxWeight as the weight for itself.
+    nom   += dRSrc(0, x) * maxWeight;
+    denom += maxWeight;
+
+    // Write back to the complete matrix.
+    if (denom != 0) dDst.at(dOriginalPos(0, x)) = nom / denom;
+    else dDst.at(dOriginalPos(0, x)) = dRSrc(0, x);
+}
+// #endif
+
+/**
+ * Kernel that applies given gaussian blur to patches contained in dRSrc.
+ */
 template <class T>
 __global__ void
 cudaApplyBlur(DMat<T> dRSrc, DMat<T> dPatchBlur)
@@ -493,6 +402,56 @@ cudaApplyBlur(DMat<T> dRSrc, DMat<T> dPatchBlur)
     for (int i = 0; i < dPatchBlur.height; ++i) {
         for (int j = 0; j < patchW; ++j) {
             dRSrc(i*patchW+j, x) *= dPatchBlur(i, j);
+        }
+    }
+}
+
+/**
+ * Kernel that copies data from given uniform matrices into given region
+ * specific matrices.
+ */
+template <class T>
+__global__ void
+cudaDivideRegions(DMatExpanded<T> dSrc,
+                  DMat<T> dFiltersSigma,
+                  DMat<int> dIds,
+                  DMat<int> dRegionalIndices,
+                  int patchH,
+                  int patchW,
+                  DMat<T*> dRSrc,
+                  DMat<T*> dRPatches,
+                  DMat<int> dRPatchesPitch,
+                  DMat<T*> dRFiltersSigma,
+                  DMat<DMatPos*> dOrigPos)
+{
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (x >= dSrc.width || y >= dSrc.height) return;
+
+    const int currentId = dIds(y, x);  // id of region
+    const int rIndex    = dRegionalIndices(y, x);  // location in region
+
+    const int boundH = (patchH - 1) / 2;
+    const int boundW = (patchW - 1) / 2;
+
+    // Keep a reference of pixel's original position in dSrc.
+    *(dOrigPos(0, currentId) + rIndex) = DMatPos(y, x);
+
+    // Copy filter sigma.
+    *(dRFiltersSigma(0, currentId) + rIndex) = dFiltersSigma(y, x);
+
+    // Copy the current pixel.
+    *(dRSrc(0, currentId) + rIndex) = dSrc(y, x);
+
+    const int patchesPitch = dRPatchesPitch(0, currentId);
+
+    // Copy the entire neighborhood of current pixel.
+    for (int i = -boundH; i < boundH+1; ++i) {
+        for (int j = -boundW; j < boundW+1; ++j) {
+            int row = (i+boundH)*patchW + (j+boundW);
+            T *loc = (T*) ((char*) dRPatches(0, currentId) + row*patchesPitch) + rIndex;
+            *loc = dSrc(y+i, x+j);
         }
     }
 }
@@ -536,6 +495,9 @@ divideInRegions(int *ids, int imgH, int imgW, std::vector<int> &regionSizes)
     return indices;
 }
 
+/**
+ * Divides given uniform matrices into region specific matrices.
+ */
 template <class T>
 void
 fillRegionalMatrices(const DMatExpanded<T> &dSrc,
@@ -592,69 +554,17 @@ fillRegionalMatrices(const DMatExpanded<T> &dSrc,
     cudaDeviceSynchronize();
 }
 
-template <class T>
-__global__ void
-cudaDivideRegions(DMatExpanded<T> dSrc,
-                  DMat<T> dFiltersSigma,
-                  DMat<int> dIds,
-                  DMat<int> dRegionalIndices,
-                  int patchH,
-                  int patchW,
-                  DMat<T*> dRSrc,
-                  DMat<T*> dRPatches,
-                  DMat<int> dRPatchesPitch,
-                  DMat<T*> dRFiltersSigma,
-                  DMat<DMatPos*> dOrigPos)
-{
-    const int x = blockIdx.x * blockDim.x + threadIdx.x;
-    const int y = blockIdx.y * blockDim.y + threadIdx.y;
-
-    // DEBUG
-    // if (x == 0 && y == 0) {
-    //     printf("Entered cudaDivideRegions kernel\n");
-    //     printf("dSrc: _isOwner:%d\n", dSrc._isOwner);
-    //     printf("dFiltersSigma: _isOwner:%d\n", dFiltersSigma._isOwner);
-    //     printf("dIds: _isOwner:%d\n", dIds._isOwner);
-    //     printf("dRegionalIndices: _isOwner:%d\n", dRegionalIndices._isOwner);
-    //     printf("dRSrc: _isOwner:%d\n", dRSrc._isOwner);
-    //     printf("dRPatches: _isOwner:%d\n", dRPatches._isOwner);
-    //     printf("dRFiltersSigma: _isOwner:%d\n", dRFiltersSigma._isOwner);
-    //     printf("dOrigPos: _isOwner:%d\n", dOrigPos._isOwner);
-    // }
-    // END DEBUG
-
-    if (x >= dSrc.width || y >= dSrc.height) return;
-
-    const int currentId = dIds(y, x);  // id of region
-    const int rIndex    = dRegionalIndices(y, x);  // location in region
-
-    const int boundH = (patchH - 1) / 2;
-    const int boundW = (patchW - 1) / 2;
-
-    // printf("y:%d x:%d currentId:%d rIndex:%d\n", y, x, currentId, rIndex);
-    // __syncthreads();
-
-    // Keep a reference of pixel's original position in dSrc.
-    *(dOrigPos(0, currentId) + rIndex) = DMatPos(y, x);
-
-    // Copy filter sigma.
-    *(dRFiltersSigma(0, currentId) + rIndex) = dFiltersSigma(y, x);
-
-    // Copy the current pixel.
-    *(dRSrc(0, currentId) + rIndex) = dSrc(y, x);
-
-    const int patchesPitch = dRPatchesPitch(0, currentId);
-
-    // Copy the entire neighborhood of current pixel.
-    for (int i = -boundH; i < boundH+1; ++i) {
-        for (int j = -boundW; j < boundW+1; ++j) {
-            int row = (i+boundH)*patchW + (j+boundW);
-            T *loc = (T*) ((char*) dRPatches(0, currentId) + row*patchesPitch) + rIndex;
-            *loc = dSrc(y+i, x+j);
-        }
-    }
-}
-
+/**
+ * Calculates a gaussian filter matrix.
+ *
+ * Parameters:
+ *  -m : Height of filter matrix.
+ *  -n : Width of filter matrix.
+ *  -sigma : Sigma to be used for gaussian filter computation.
+ *
+ * Returns:
+ *  A vector containing the gaussian filter in row major order.
+ */
 template <class T>
 std::vector<T>
 calculateGaussianFilter(int m, int n, T sigma)
@@ -681,6 +591,7 @@ calculateGaussianFilter(int m, int n, T sigma)
 }
 
 
+// ----------- Declarations for pregenerating code by compiler -------------
 template
 void
 adaptiveNonLocalMeansNormalData<float>(float *, float *, int *, float *,
