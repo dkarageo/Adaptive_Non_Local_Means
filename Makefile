@@ -24,7 +24,9 @@ CUOBJECTS=$(addprefix $(CUOBJDIR)/, \
 				DMat.o \
 				init.o )
 
-TESTS=test_blonde128 \
+TESTS=test_blonde64 \
+	  test_blonde128 \
+	  test_blonde192 \
 	  test_lena64 \
 	  test_lena128 \
 	  test_lena192 \
@@ -67,14 +69,24 @@ test: $(TESTS)
 
 benchmark: test $(BENCHMARKS)
 
+test_blonde64:
+	echo "Running test on blonde64 data..."
+	./$(BINDIR)/demo_anlm test_datasets/woman_blonde_64_noisy.karas 6 \
+						  test_datasets/woman_blonde_64_filtered.karas
+
 test_blonde128:
 	echo "Running test on blonde128 data..."
-	./$(BINDIR)/demo_anlm test_datasets/woman_blonde_small_noisy.karas 6 \
-						  test_datasets/woman_blonde_small_filtered.karas
+	./$(BINDIR)/demo_anlm test_datasets/woman_blonde_128_noisy.karas 6 \
+						  test_datasets/woman_blonde_128_filtered.karas
+
+test_blonde192:
+	echo "Running test on blonde192 data..."
+	./$(BINDIR)/demo_anlm test_datasets/woman_blonde_192_noisy.karas 6 \
+						  test_datasets/woman_blonde_192_filtered.karas
 
 bench_blonde512:
 	echo "Running benchmark on blonde512 data..."
-	./$(BINDIR)/demo_anlm test_datasets/woman_blonde_noisy.karas 6
+	./$(BINDIR)/demo_anlm test_datasets/woman_blonde_512_noisy.karas 6
 
 test_lena64:
 	echo "Running test on lena64 data..."
