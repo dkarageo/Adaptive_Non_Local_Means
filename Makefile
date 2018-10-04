@@ -1,15 +1,17 @@
 CXX=g++
-CXXFLAGS=-O3 -Wall -Wextra -std=c++11 -g
+CXXFLAGS=-O3 -Wall -Wextra -std=c++11
 LDLIBS=-lm -fopenmp
 OBJDIR=obj
 
 NVCC=nvcc
-CUFLAGS=-O3 -std=c++11 -g -lineinfo
+CUFLAGS=-O3 -std=c++11
 CULDLIBS= -lcusolver -lm -lcudart -lcuda
 CULINK=-L/usr/local/cuda/lib64
 CUOBJDIR=cuobj
 
 BINDIR=bin
+
+force_big: MODS=-DFORCE_ANLM_BIG
 
 vpath %.cpp source
 vpath %.hpp source source/cuda
@@ -24,7 +26,9 @@ CUOBJECTS=$(addprefix $(CUOBJDIR)/, \
 				DMat.o \
 				init.o )
 
-TESTS=test_blonde128 \
+TESTS=test_blonde64 \
+	  test_blonde128 \
+	  test_blonde192 \
 	  test_lena64 \
 	  test_lena128 \
 	  test_lena192 \
@@ -42,11 +46,18 @@ all: $(OBJECTS) $(CUOBJECTS) | $(BINDIR)
 	$(CXX) $(OBJECTS) $(CUOBJECTS) -o $(BINDIR)/demo_anlm $(CXXFLAGS) \
 			$(CULINK) $(CULDLIBS) $(LDLIBS)
 
+force_big: $(OBJECTS) $(CUOBJECTS) | $(BINDIR)
+	$(CXX) $(OBJECTS) $(CUOBJECTS) -o $(BINDIR)/demo_anlm $(CXXFLAGS) \
+			$(CULINK) $(CULDLIBS) $(LDLIBS)
+
 $(OBJDIR)/%.o: %.cpp | $(OBJDIR)
 	$(CXX) $< -c -o $@ $(CXXFLAGS) $(MODS)
 
+$(OBJDIR)/demo.o: demo.cpp FORCE | $(OBJDIR)
+	$(CXX) $< -c -o $@ $(CXXFLAGS) $(MODS)
+
 $(CUOBJDIR)/%.o: %.cu | $(CUOBJDIR)
-	$(NVCC) $< -c -o $@ $(CUFLAGS) $(CULDLIBS)
+	$(NVCC) $< -c -o $@ $(CUFLAGS) $(CULDLIBS) $(MODS)
 
 $(OBJDIR):
 	mkdir $(OBJDIR)
@@ -67,14 +78,24 @@ test: $(TESTS)
 
 benchmark: test $(BENCHMARKS)
 
+test_blonde64:
+	echo "Running test on blonde64 data..."
+	./$(BINDIR)/demo_anlm test_datasets/woman_blonde_64_noisy.karas 6 \
+						  test_datasets/woman_blonde_64_filtered.karas
+
 test_blonde128:
 	echo "Running test on blonde128 data..."
-	./$(BINDIR)/demo_anlm test_datasets/woman_blonde_small_noisy.karas 6 \
-						  test_datasets/woman_blonde_small_filtered.karas
+	./$(BINDIR)/demo_anlm test_datasets/woman_blonde_128_noisy.karas 6 \
+						  test_datasets/woman_blonde_128_filtered.karas
+
+test_blonde192:
+	echo "Running test on blonde192 data..."
+	./$(BINDIR)/demo_anlm test_datasets/woman_blonde_192_noisy.karas 6 \
+						  test_datasets/woman_blonde_192_filtered.karas
 
 bench_blonde512:
 	echo "Running benchmark on blonde512 data..."
-	./$(BINDIR)/demo_anlm test_datasets/woman_blonde_noisy.karas 6
+	./$(BINDIR)/demo_anlm test_datasets/woman_blonde_512_noisy.karas 6
 
 test_lena64:
 	echo "Running test on lena64 data..."
@@ -118,3 +139,6 @@ bench_clouds:
 	echo "Running benchmark on 'clouds' data..."
 	echo "WARNING: This benchmark may take several hours to complete!"
 	./$(BINDIR)/demo_anlm test_datasets/clouds_noisy.karas 6
+
+.PHONY: FORCE
+FORCE:

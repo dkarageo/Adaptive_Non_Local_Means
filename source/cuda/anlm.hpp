@@ -109,6 +109,7 @@ adaptiveNonLocalMeans(T *src, T *dst, int *ids, T *filterSigma,
                       int imgH, int imgW, int patchH, int patchW,
                       T patchSigma, int regions)
 {
+#ifndef FORCE_ANLM_BIG
     long imgSize = sizeof(T) * imgH * imgW;
 
     // Make a rough estimation about the maximum dram that may be needed
@@ -121,11 +122,14 @@ adaptiveNonLocalMeans(T *src, T *dst, int *ids, T *filterSigma,
             patchSigma, regions
         );
     } else {
+#endif
         adaptiveNonLocalMeansBigData(
             src, dst, ids, filterSigma, imgH, imgW, patchH, patchW,
             patchSigma, regions
         );
+#ifndef FORCE_ANLM_BIG
     }
+#endif
 }
 
 }

@@ -64,7 +64,7 @@ testCudaAnlmFP32(vector<double> noisyImgFP64, int height, int width,
 int main(int argc, char *argv[])
 {
     if (argc < 3) {
-        cout << "Usage: ./" << argv[0] << " <noisy_img> <regions> [<test_data> <test_ids>]";
+        cout << "Usage: ./" << argv[0] << " <noisy_img> <regions> [<test_data>]";
         exit(-1);
     }
 

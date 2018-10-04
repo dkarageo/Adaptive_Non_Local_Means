@@ -1,7 +1,13 @@
 /**
  * init.cu
  *
+ * Created by Dimitrios Karageorgiou,
+ *  for course "Parallel And Distributed Systems".
+ *  Electrical and Computers Engineering Department, AuTh, GR - 2017-2018
+ *
  * Code that will trigger loading of CUDA libraries.
+ *
+ * Version: 0.1
  */
 
 #include <cassert>
