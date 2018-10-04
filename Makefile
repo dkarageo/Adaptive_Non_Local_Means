@@ -1,10 +1,10 @@
 CXX=g++
-CXXFLAGS=-O3 -Wall -Wextra -std=c++11 -g
+CXXFLAGS=-O3 -Wall -Wextra -std=c++11
 LDLIBS=-lm -fopenmp
 OBJDIR=obj
 
 NVCC=nvcc
-CUFLAGS=-O3 -std=c++11 -g -lineinfo
+CUFLAGS=-O3 -std=c++11
 CULDLIBS= -lcusolver -lm -lcudart -lcuda
 CULINK=-L/usr/local/cuda/lib64
 CUOBJDIR=cuobj
