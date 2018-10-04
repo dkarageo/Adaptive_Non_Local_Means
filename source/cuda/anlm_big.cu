@@ -114,7 +114,7 @@ adaptiveNonLocalMeansBigData(T *src, T *dst, int *ids, T *filterSigma,
     assert(cudaSuccess == cudaStat);
 
     // Apply anlm to each pixel separately.
-    cudaAnlmKernel<<<gridDim, blockDim>>>(
+    cudaAnlmKernel<<<gridDim, blockDim, patchH*patchW*sizeof(T)>>>(
             dSrc, dDst, dIds, dNext, dPrev, dHeads, dFilterSigma, dPatchBlur, patchH, patchW
     );
     gpuErrchk( cudaPeekAtLastError() );
@@ -141,10 +141,15 @@ cudaAnlmKernel(DMatExpanded<T> dSrc, DMat<T> dDst, DMat<int> dIds,
     const int boundW = (patchW - 1) / 2;
     const T fSigma   = dFilterSigma(y, x) * dFilterSigma(y, x);
 
-    __shared__ T patchBlur[5][5];
+    // TODO: Consider removing shared memory usage completely. In most modern
+    // architectures won't make any difference because L1 cache would do the job.
+    // It's also a source of edge case bugs and won't bother fixing them.
+    // Just for compatibility reasons with compute capability 1.x devices.
+    extern __shared__ char sPatchBlurBytes[];
+    T *sPatchBlur = (T*) sPatchBlurBytes;
 
-    if (threadIdx.y < 5 && threadIdx.x < 5)
-        patchBlur[threadIdx.y][threadIdx.x] = dPatchBlur(threadIdx.y, threadIdx.x);
+    if (threadIdx.y < patchH && threadIdx.x < patchW)
+        sPatchBlur[threadIdx.y*patchW+threadIdx.x] = dPatchBlur(threadIdx.y, threadIdx.x);
     __syncthreads();
 
     T nom = 0;
@@ -160,8 +165,8 @@ cudaAnlmKernel(DMatExpanded<T> dSrc, DMat<T> dDst, DMat<int> dIds,
 
         for (int i = -boundH; i < boundH+1; ++i) {
             for (int j = -boundW; j < boundW+1; ++j) {
-                T d = dSrc(y+i, x+j) * patchBlur[boundH+i][boundW+j] -
-                      dSrc(curCell.y+i, curCell.x+j) * patchBlur[boundH+i][boundW+j];
+                T d = dSrc(y+i, x+j) * sPatchBlur[(boundH+i)*patchW+(boundW+j)] -
+                      dSrc(curCell.y+i, curCell.x+j) * sPatchBlur[(boundH+i)*patchW+(boundW+j)];
                 weight += d*d;
             }
         }
