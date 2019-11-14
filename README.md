@@ -52,7 +52,7 @@ Someone may be wondering what *.karas* files are. They are just custom binary fi
 ### How to use included implementation:
 
 - In order to use the provided Adaptive Non Local Means implementation, include `cuda/anlm.hpp` header file.
-- In order to change the maximum VRAM allowed to be used before switching to the implementation for big images, set `MAD_DEVICE_DRAM_USAGE` macro to the desired amount in MB. Default amount is 1480MB, because its original target was an old Nvidia GTX 480.
+- In order to change the maximum VRAM allowed to be used before switching to the implementation for big images, set `MAX_DEVICE_DRAM_USAGE` macro to the desired amount in MB. Default amount is 1480MB, because its original target was an old Nvidia GTX 480.
 
 
 ### Licensing:
